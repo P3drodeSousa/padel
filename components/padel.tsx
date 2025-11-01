@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect, ChangeEvent } from "react";
 import {
   Trophy,
@@ -22,6 +24,23 @@ interface Match extends TournamentMatch {
   id: string;
   cycle: number;
   globalRound: number;
+  score1_set1: number | null;
+  score1_set2: number | null;
+  score2_set1: number | null;
+  score2_set2: number | null;
+  completed: boolean;
+}
+
+interface DBMatch {
+  id: string;
+  cycle: number;
+  round: number;
+  global_round: number;
+  team1_player1: string;
+  team1_player2: string;
+  team2_player1: string;
+  team2_player2: string;
+  resting_player: string;
   score1_set1: number | null;
   score1_set2: number | null;
   score2_set1: number | null;
@@ -145,14 +164,48 @@ const TOURNAMENT_STRUCTURE: TournamentMatch[] = [
 
 const PLAYERS: PlayerName[] = ["Gonza", "Pedro", "Paulo", "Ivo", "Diogo"];
 
-// Types for window.storage
-declare global {
-  interface Window {
-    storage: {
-      get: (key: string) => Promise<{ value: string } | null>;
-      set: (key: string, val: string) => Promise<void>;
-    };
-  }
+// Convert DB format to app format
+function dbMatchToMatch(dbMatch: DBMatch): Match {
+  return {
+    id: dbMatch.id,
+    cycle: dbMatch.cycle,
+    round: dbMatch.round,
+    globalRound: dbMatch.global_round,
+    team1: [
+      dbMatch.team1_player1 as PlayerName,
+      dbMatch.team1_player2 as PlayerName,
+    ],
+    team2: [
+      dbMatch.team2_player1 as PlayerName,
+      dbMatch.team2_player2 as PlayerName,
+    ],
+    resting: dbMatch.resting_player as PlayerName,
+    score1_set1: dbMatch.score1_set1,
+    score1_set2: dbMatch.score1_set2,
+    score2_set1: dbMatch.score2_set1,
+    score2_set2: dbMatch.score2_set2,
+    completed: dbMatch.completed,
+  };
+}
+
+// Convert app format to DB format
+function matchToDbMatch(match: Match): DBMatch {
+  return {
+    id: match.id,
+    cycle: match.cycle,
+    round: match.round,
+    global_round: match.globalRound,
+    team1_player1: match.team1[0],
+    team1_player2: match.team1[1],
+    team2_player1: match.team2[0],
+    team2_player2: match.team2[1],
+    resting_player: match.resting,
+    score1_set1: match.score1_set1,
+    score1_set2: match.score1_set2,
+    score2_set1: match.score2_set1,
+    score2_set2: match.score2_set2,
+    completed: match.completed,
+  };
 }
 
 export default function PadelTournament() {
@@ -162,6 +215,7 @@ export default function PadelTournament() {
     "matches"
   );
   const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
 
   useEffect(() => {
     loadMatches();
@@ -185,46 +239,48 @@ export default function PadelTournament() {
 
   const loadMatches = async () => {
     try {
-      const result = await window.storage.get("padel-matches-v2");
-      if (result) {
-        const data = JSON.parse(result.value) as {
-          matches: Match[];
-          cycles: number;
-        };
-        setMatches(data.matches);
-        setCycles(data.cycles);
+      const response = await fetch("/api/matches");
+      if (!response.ok) throw new Error("Failed to fetch matches");
+
+      const data = await response.json();
+
+      if (data.matches && data.matches.length > 0) {
+        const convertedMatches = data.matches.map(dbMatchToMatch);
+        setMatches(convertedMatches);
+        setCycles(data.cycles || 1);
       } else {
-        setMatches(getInitialMatches(1));
-        setCycles(1);
+        // Initialize with first cycle
+        const initialMatches = getInitialMatches(1);
+        await initializeDatabase(initialMatches);
       }
-    } catch {
-      setMatches(getInitialMatches(1));
-      setCycles(1);
+    } catch (error) {
+      console.error("Error loading matches:", error);
+      alert("Failed to load tournament data. Please refresh the page.");
     } finally {
       setLoading(false);
     }
   };
 
-  const saveMatches = async (
-    updatedMatches: Match[],
-    updatedCycles?: number
-  ) => {
+  const initializeDatabase = async (initialMatches: Match[]) => {
     try {
-      const data = {
-        matches: updatedMatches,
-        cycles: updatedCycles ?? cycles,
-        lastUpdated: new Date().toISOString(),
-      };
-      await window.storage.set("padel-matches-v2", JSON.stringify(data));
-      setMatches(updatedMatches);
-      if (updatedCycles) setCycles(updatedCycles);
+      const dbMatches = initialMatches.map(matchToDbMatch);
+      await fetch("/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_cycle",
+          matches: dbMatches,
+          cycles: 1,
+        }),
+      });
+      setMatches(initialMatches);
+      setCycles(1);
     } catch (error) {
-      console.error("Error saving matches:", error);
-      alert("Failed to save match data");
+      console.error("Error initializing database:", error);
     }
   };
 
-  const updateScore = (
+  const updateScore = async (
     matchId: string,
     field: keyof Pick<
       Match,
@@ -232,9 +288,10 @@ export default function PadelTournament() {
     >,
     value: string
   ) => {
-    const updated = matches.map((match) => {
+    const numValue = value === "" ? null : parseInt(value);
+
+    const updatedMatches = matches.map((match) => {
       if (match.id === matchId) {
-        const numValue = value === "" ? null : parseInt(value);
         const updatedMatch = { ...match, [field]: numValue };
 
         // Mark as completed if all scores are set
@@ -249,19 +306,88 @@ export default function PadelTournament() {
           updatedMatch.completed = false;
         }
 
+        // Save to database
+        saveMatchToDatabase(updatedMatch);
         return updatedMatch;
       }
       return match;
     });
 
-    saveMatches(updated);
+    setMatches(updatedMatches);
   };
 
-  const addNewCycle = () => {
-    const newCycle = cycles + 1;
-    const newMatches = getInitialMatches(newCycle, matches.length + 1);
-    const updatedMatches = [...matches, ...newMatches];
-    saveMatches(updatedMatches, newCycle);
+  const saveMatchToDatabase = async (match: Match) => {
+    try {
+      setSaving(true);
+      const dbMatch = matchToDbMatch(match);
+      await fetch("/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_score",
+          match: dbMatch,
+        }),
+      });
+    } catch (error) {
+      console.error("Error saving match:", error);
+      alert("Failed to save match scores");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addNewCycle = async () => {
+    try {
+      setSaving(true);
+      const newCycle = cycles + 1;
+      const newMatches = getInitialMatches(newCycle, matches.length + 1);
+      const dbMatches = newMatches.map(matchToDbMatch);
+
+      await fetch("/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_cycle",
+          matches: dbMatches,
+          cycles: newCycle,
+        }),
+      });
+
+      setMatches([...matches, ...newMatches]);
+      setCycles(newCycle);
+    } catch (error) {
+      console.error("Error adding new cycle:", error);
+      alert("Failed to add new cycle");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetTournament = async () => {
+    if (
+      !window.confirm(
+        "Are you sure you want to reset all matches? This cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await fetch("/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset" }),
+      });
+
+      const initialMatches = getInitialMatches(1);
+      await initializeDatabase(initialMatches);
+    } catch (error) {
+      console.error("Error resetting tournament:", error);
+      alert("Failed to reset tournament");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const getMatchWinner = (match: Match): "team1" | "team2" | null => {
@@ -272,8 +398,7 @@ export default function PadelTournament() {
     const team2Sets =
       (match.score2_set1! > match.score1_set1! ? 1 : 0) +
       (match.score2_set2! > match.score1_set2! ? 1 : 0);
-    if (team1Sets > team2Sets) return "team1";
-    return "team2";
+    return team1Sets > team2Sets ? "team1" : "team2";
   };
 
   const calculateStats = (): Stats => {
@@ -333,17 +458,6 @@ export default function PadelTournament() {
     return stats;
   };
 
-  const resetTournament = async () => {
-    if (
-      window.confirm(
-        "Are you sure you want to reset all matches? This cannot be undone."
-      )
-    ) {
-      const initialMatches = getInitialMatches(1);
-      saveMatches(initialMatches, 1);
-    }
-  };
-
   const stats = calculateStats();
   const leaderboard: LeaderEntry[] = Object.entries(stats)
     .map(([name, data]) => ({
@@ -358,7 +472,6 @@ export default function PadelTournament() {
         b.won - a.won || b.setsWon - a.setsWon || b.gameDiff - a.gameDiff
     );
 
-  // Group matches by cycle
   const matchesByCycle: { [cycle: number]: Match[] } = {};
   matches.forEach((match) => {
     if (!matchesByCycle[match.cycle]) {
@@ -396,30 +509,28 @@ export default function PadelTournament() {
             <div className="flex gap-2">
               <button
                 onClick={addNewCycle}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
+                disabled={saving}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition disabled:opacity-50"
               >
                 <Plus className="w-5 h-5" />
                 Add 15 Rounds
               </button>
               <button
                 onClick={resetTournament}
-                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+                disabled={saving}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition disabled:opacity-50"
               >
                 Reset All
               </button>
             </div>
           </div>
 
-          {/* Storage Info */}
-          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>💾 Storage:</strong> All scores are saved automatically to
-              persistent storage. Your data is saved in the browser and will
-              persist across sessions. For Supabase integration, replace{" "}
-              <code className="px-1 py-0.5 bg-blue-100 rounded">
-                window.storage
-              </code>{" "}
-              calls with Supabase queries.
+          {/* Database Info */}
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-800">
+              <strong>💾 Database:</strong> Connected to Vercel Postgres. All
+              scores are automatically saved.
+              {saving && <span className="ml-2 text-green-600">Saving...</span>}
             </p>
           </div>
         </div>
@@ -471,7 +582,7 @@ export default function PadelTournament() {
                       / {matchesByCycle[Number(cycleNum)].length} completed
                     </span>
                   </div>
-                  {matchesByCycle[Number(cycleNum)].map((match, index) => {
+                  {matchesByCycle[Number(cycleNum)].map((match) => {
                     const winner = getMatchWinner(match);
                     return (
                       <div
