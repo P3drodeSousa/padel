@@ -485,13 +485,13 @@ export default function PadelTournament() {
           </div>
 
           {/* Database Info */}
-          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+          {/* <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-sm text-green-800">
               <strong>💾 Database:</strong> Connected to Vercel Postgres. All
               scores are automatically saved.
               {saving && <span className="ml-2 text-green-600">Saving...</span>}
             </p>
-          </div>
+          </div> */}
         </div>
 
         {/* Tabs */}
