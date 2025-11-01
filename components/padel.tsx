@@ -24,10 +24,8 @@ interface Match extends TournamentMatch {
   id: string;
   cycle: number;
   globalRound: number;
-  score1_set1: number | null;
-  score1_set2: number | null;
-  score2_set1: number | null;
-  score2_set2: number | null;
+  score1: number | null;
+  score2: number | null;
   completed: boolean;
 }
 
@@ -41,10 +39,8 @@ interface DBMatch {
   team2_player1: string;
   team2_player2: string;
   resting_player: string;
-  score1_set1: number | null;
-  score1_set2: number | null;
-  score2_set1: number | null;
-  score2_set2: number | null;
+  score1: number | null;
+  score2: number | null;
   completed: boolean;
 }
 
@@ -52,10 +48,9 @@ interface MatchStats {
   played: number;
   won: number;
   lost: number;
-  setsWon: number;
-  setsLost: number;
-  gamesWon: number;
-  gamesLost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
 }
 
 interface Stats {
@@ -65,7 +60,6 @@ interface Stats {
 interface LeaderEntry extends MatchStats {
   name: PlayerName;
   winRate: string | number;
-  gameDiff: number;
 }
 
 // Tournament structure
@@ -180,10 +174,8 @@ function dbMatchToMatch(dbMatch: DBMatch): Match {
       dbMatch.team2_player2 as PlayerName,
     ],
     resting: dbMatch.resting_player as PlayerName,
-    score1_set1: dbMatch.score1_set1,
-    score1_set2: dbMatch.score1_set2,
-    score2_set1: dbMatch.score2_set1,
-    score2_set2: dbMatch.score2_set2,
+    score1: dbMatch.score1,
+    score2: dbMatch.score2,
     completed: dbMatch.completed,
   };
 }
@@ -200,10 +192,8 @@ function matchToDbMatch(match: Match): DBMatch {
     team2_player1: match.team2[0],
     team2_player2: match.team2[1],
     resting_player: match.resting,
-    score1_set1: match.score1_set1,
-    score1_set2: match.score1_set2,
-    score2_set1: match.score2_set1,
-    score2_set2: match.score2_set2,
+    score1: match.score1,
+    score2: match.score2,
     completed: match.completed,
   };
 }
@@ -230,10 +220,8 @@ export default function PadelTournament() {
       id: `cycle-${cycle}-round-${match.round}`,
       cycle: cycle,
       globalRound: startGlobalRound + idx,
-      score1_set1: null,
-      score1_set2: null,
-      score2_set1: null,
-      score2_set2: null,
+      score1: null,
+      score2: null,
       completed: false,
     }));
 
@@ -249,7 +237,6 @@ export default function PadelTournament() {
         setMatches(convertedMatches);
         setCycles(data.cycles || 1);
       } else {
-        // Initialize with first cycle
         const initialMatches = getInitialMatches(1);
         await initializeDatabase(initialMatches);
       }
@@ -282,10 +269,7 @@ export default function PadelTournament() {
 
   const updateScore = async (
     matchId: string,
-    field: keyof Pick<
-      Match,
-      "score1_set1" | "score1_set2" | "score2_set1" | "score2_set2"
-    >,
+    field: "score1" | "score2",
     value: string
   ) => {
     const numValue = value === "" ? null : parseInt(value);
@@ -294,19 +278,13 @@ export default function PadelTournament() {
       if (match.id === matchId) {
         const updatedMatch = { ...match, [field]: numValue };
 
-        // Mark as completed if all scores are set
-        if (
-          updatedMatch.score1_set1 !== null &&
-          updatedMatch.score1_set2 !== null &&
-          updatedMatch.score2_set1 !== null &&
-          updatedMatch.score2_set2 !== null
-        ) {
+        // Mark as completed if both scores are set
+        if (updatedMatch.score1 !== null && updatedMatch.score2 !== null) {
           updatedMatch.completed = true;
         } else {
           updatedMatch.completed = false;
         }
 
-        // Save to database
         saveMatchToDatabase(updatedMatch);
         return updatedMatch;
       }
@@ -390,15 +368,11 @@ export default function PadelTournament() {
     }
   };
 
-  const getMatchWinner = (match: Match): "team1" | "team2" | null => {
+  const getMatchWinner = (match: Match): "team1" | "team2" | "draw" | null => {
     if (!match.completed) return null;
-    const team1Sets =
-      (match.score1_set1! > match.score2_set1! ? 1 : 0) +
-      (match.score1_set2! > match.score2_set2! ? 1 : 0);
-    const team2Sets =
-      (match.score2_set1! > match.score1_set1! ? 1 : 0) +
-      (match.score2_set2! > match.score1_set2! ? 1 : 0);
-    return team1Sets > team2Sets ? "team1" : "team2";
+    if (match.score1! > match.score2!) return "team1";
+    if (match.score2! > match.score1!) return "team2";
+    return "draw";
   };
 
   const calculateStats = (): Stats => {
@@ -408,10 +382,9 @@ export default function PadelTournament() {
         played: 0,
         won: 0,
         lost: 0,
-        setsWon: 0,
-        setsLost: 0,
-        gamesWon: 0,
-        gamesLost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDiff: 0,
       };
     });
 
@@ -419,42 +392,32 @@ export default function PadelTournament() {
       if (!match.completed) return;
       const winner = getMatchWinner(match);
       const team1Won = winner === "team1";
-      const team1GamesWon = (match.score1_set1 ?? 0) + (match.score1_set2 ?? 0);
-      const team1GamesLost =
-        (match.score2_set1 ?? 0) + (match.score2_set2 ?? 0);
-      const team2GamesWon = (match.score2_set1 ?? 0) + (match.score2_set2 ?? 0);
-      const team2GamesLost =
-        (match.score1_set1 ?? 0) + (match.score1_set2 ?? 0);
-
-      const team1SetsWon =
-        (match.score1_set1! > match.score2_set1! ? 1 : 0) +
-        (match.score1_set2! > match.score2_set2! ? 1 : 0);
-      const team1SetsLost =
-        (match.score2_set1! > match.score1_set1! ? 1 : 0) +
-        (match.score2_set2! > match.score1_set2! ? 1 : 0);
-      const team2SetsWon = team1SetsLost;
-      const team2SetsLost = team1SetsWon;
+      const team2Won = winner === "team2";
+      const isDraw = winner === "draw";
 
       match.team1.forEach((player) => {
         stats[player].played++;
-        stats[player].gamesWon += team1GamesWon;
-        stats[player].gamesLost += team1GamesLost;
-        stats[player].setsWon += team1SetsWon;
-        stats[player].setsLost += team1SetsLost;
+        stats[player].goalsFor += match.score1 ?? 0;
+        stats[player].goalsAgainst += match.score2 ?? 0;
         if (team1Won) stats[player].won++;
-        else stats[player].lost++;
+        else if (team2Won) stats[player].lost++;
       });
 
       match.team2.forEach((player) => {
         stats[player].played++;
-        stats[player].gamesWon += team2GamesWon;
-        stats[player].gamesLost += team2GamesLost;
-        stats[player].setsWon += team2SetsWon;
-        stats[player].setsLost += team2SetsLost;
-        if (!team1Won) stats[player].won++;
-        else stats[player].lost++;
+        stats[player].goalsFor += match.score2 ?? 0;
+        stats[player].goalsAgainst += match.score1 ?? 0;
+        if (team2Won) stats[player].won++;
+        else if (team1Won) stats[player].lost++;
       });
     });
+
+    // Calculate goal difference
+    Object.keys(stats).forEach((player) => {
+      stats[player].goalDiff =
+        stats[player].goalsFor - stats[player].goalsAgainst;
+    });
+
     return stats;
   };
 
@@ -465,12 +428,8 @@ export default function PadelTournament() {
       ...data,
       winRate:
         data.played > 0 ? ((data.won / data.played) * 100).toFixed(1) : 0,
-      gameDiff: data.gamesWon - data.gamesLost,
     }))
-    .sort(
-      (a, b) =>
-        b.won - a.won || b.setsWon - a.setsWon || b.gameDiff - a.gameDiff
-    );
+    .sort((a, b) => b.won - a.won || b.goalDiff - a.goalDiff);
 
   const matchesByCycle: { [cycle: number]: Match[] } = {};
   matches.forEach((match) => {
@@ -610,152 +569,94 @@ export default function PadelTournament() {
                           </div>
                           {match.completed && (
                             <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
-                              Completed
+                              Final: {match.score1} - {match.score2}
                             </span>
                           )}
                         </div>
-                        <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                           {/* Team 1 */}
                           <div
                             className={`p-4 rounded-lg ${
                               winner === "team1"
                                 ? "bg-green-50 border-2 border-green-500"
+                                : winner === "draw"
+                                ? "bg-yellow-50 border-2 border-yellow-400"
                                 : "bg-gray-50"
                             }`}
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2 flex-1">
                                 <Users className="w-5 h-5 text-blue-500" />
-                                <span className="font-semibold text-gray-800 text-lg">
+                                <span className="font-semibold text-gray-800">
                                   {match.team1.join(" & ")}
                                 </span>
                                 {winner === "team1" && (
                                   <Trophy className="w-5 h-5 text-green-600" />
                                 )}
                               </div>
-                              <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={99}
-                                    value={
-                                      match.score1_set1 === null
-                                        ? ""
-                                        : match.score1_set1
-                                    }
-                                    onChange={(
-                                      e: ChangeEvent<HTMLInputElement>
-                                    ) =>
-                                      updateScore(
-                                        match.id,
-                                        "score1_set1",
-                                        e.target.value
-                                      )
-                                    }
-                                    placeholder="0"
-                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
-                                  />
-                                  <span className="text-gray-400 font-bold">
-                                    -
-                                  </span>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={99}
-                                    value={
-                                      match.score1_set2 === null
-                                        ? ""
-                                        : match.score1_set2
-                                    }
-                                    onChange={(
-                                      e: ChangeEvent<HTMLInputElement>
-                                    ) =>
-                                      updateScore(
-                                        match.id,
-                                        "score1_set2",
-                                        e.target.value
-                                      )
-                                    }
-                                    placeholder="0"
-                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
-                                  />
-                                </div>
-                              </div>
+                              <input
+                                type="number"
+                                min={0}
+                                max={99}
+                                value={
+                                  match.score1 === null ? "" : match.score1
+                                }
+                                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                  updateScore(
+                                    match.id,
+                                    "score1",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="0"
+                                className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-2xl font-bold"
+                              />
                             </div>
                           </div>
+
                           {/* VS Divider */}
                           <div className="text-center">
-                            <span className="text-xl font-bold text-gray-400">
+                            <span className="text-2xl font-bold text-gray-400">
                               VS
                             </span>
                           </div>
+
                           {/* Team 2 */}
                           <div
                             className={`p-4 rounded-lg ${
                               winner === "team2"
                                 ? "bg-green-50 border-2 border-green-500"
+                                : winner === "draw"
+                                ? "bg-yellow-50 border-2 border-yellow-400"
                                 : "bg-gray-50"
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 flex-1">
-                                <Users className="w-5 h-5 text-red-500" />
-                                <span className="font-semibold text-gray-800 text-lg">
-                                  {match.team2.join(" & ")}
-                                </span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={99}
+                                value={
+                                  match.score2 === null ? "" : match.score2
+                                }
+                                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                  updateScore(
+                                    match.id,
+                                    "score2",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="0"
+                                className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-2xl font-bold"
+                              />
+                              <div className="flex items-center gap-2 flex-1 justify-end">
                                 {winner === "team2" && (
                                   <Trophy className="w-5 h-5 text-green-600" />
                                 )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={99}
-                                    value={
-                                      match.score2_set1 === null
-                                        ? ""
-                                        : match.score2_set1
-                                    }
-                                    onChange={(
-                                      e: ChangeEvent<HTMLInputElement>
-                                    ) =>
-                                      updateScore(
-                                        match.id,
-                                        "score2_set1",
-                                        e.target.value
-                                      )
-                                    }
-                                    placeholder="0"
-                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
-                                  />
-                                  <span className="text-gray-400 font-bold">
-                                    -
-                                  </span>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={99}
-                                    value={
-                                      match.score2_set2 === null
-                                        ? ""
-                                        : match.score2_set2
-                                    }
-                                    onChange={(
-                                      e: ChangeEvent<HTMLInputElement>
-                                    ) =>
-                                      updateScore(
-                                        match.id,
-                                        "score2_set2",
-                                        e.target.value
-                                      )
-                                    }
-                                    placeholder="0"
-                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
-                                  />
-                                </div>
+                                <span className="font-semibold text-gray-800">
+                                  {match.team2.join(" & ")}
+                                </span>
+                                <Users className="w-5 h-5 text-red-500" />
                               </div>
                             </div>
                           </div>
@@ -788,13 +689,13 @@ export default function PadelTournament() {
                       Win %
                     </th>
                     <th className="px-6 py-4 text-center font-semibold">
-                      Sets W-L
+                      Goals For
                     </th>
                     <th className="px-6 py-4 text-center font-semibold">
-                      Games W-L
+                      Goals Against
                     </th>
                     <th className="px-6 py-4 text-center font-semibold">
-                      Game Diff
+                      Goal Diff
                     </th>
                   </tr>
                 </thead>
@@ -830,22 +731,22 @@ export default function PadelTournament() {
                         {player.winRate}%
                       </td>
                       <td className="px-6 py-4 text-center">
-                        {player.setsWon}-{player.setsLost}
+                        {player.goalsFor}
                       </td>
                       <td className="px-6 py-4 text-center">
-                        {player.gamesWon}-{player.gamesLost}
+                        {player.goalsAgainst}
                       </td>
                       <td
                         className={`px-6 py-4 text-center font-semibold ${
-                          player.gameDiff > 0
+                          player.goalDiff > 0
                             ? "text-green-600"
-                            : player.gameDiff < 0
+                            : player.goalDiff < 0
                             ? "text-red-600"
                             : "text-gray-600"
                         }`}
                       >
-                        {player.gameDiff > 0 ? "+" : ""}
-                        {player.gameDiff}
+                        {player.goalDiff > 0 ? "+" : ""}
+                        {player.goalDiff}
                       </td>
                     </tr>
                   ))}
