@@ -609,7 +609,7 @@ export default function PadelTournament() {
                                   )
                                 }
                                 placeholder="0"
-                                className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-2xl font-bold"
+                                className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-2xl font-bold text-black"
                               />
                             </div>
                           </div>
@@ -647,7 +647,7 @@ export default function PadelTournament() {
                                   )
                                 }
                                 placeholder="0"
-                                className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-2xl font-bold"
+                                className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-2xl font-bold text-black"
                               />
                               <div className="flex items-center gap-2 flex-1 justify-end">
                                 {winner === "team2" && (
