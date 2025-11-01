@@ -1,0 +1,749 @@
+import React, { useState, useEffect, ChangeEvent } from "react";
+import {
+  Trophy,
+  Users,
+  Calendar,
+  TrendingUp,
+  RotateCw,
+  Plus,
+} from "lucide-react";
+
+// Types
+type PlayerName = "Gonza" | "Pedro" | "Paulo" | "Ivo" | "Diogo";
+
+interface TournamentMatch {
+  round: number;
+  team1: [PlayerName, PlayerName];
+  team2: [PlayerName, PlayerName];
+  resting: PlayerName;
+}
+
+interface Match extends TournamentMatch {
+  id: string;
+  cycle: number;
+  globalRound: number;
+  score1_set1: number | null;
+  score1_set2: number | null;
+  score2_set1: number | null;
+  score2_set2: number | null;
+  completed: boolean;
+}
+
+interface MatchStats {
+  played: number;
+  won: number;
+  lost: number;
+  setsWon: number;
+  setsLost: number;
+  gamesWon: number;
+  gamesLost: number;
+}
+
+interface Stats {
+  [player: string]: MatchStats;
+}
+
+interface LeaderEntry extends MatchStats {
+  name: PlayerName;
+  winRate: string | number;
+  gameDiff: number;
+}
+
+// Tournament structure
+const TOURNAMENT_STRUCTURE: TournamentMatch[] = [
+  {
+    round: 1,
+    team1: ["Pedro", "Paulo"],
+    team2: ["Ivo", "Diogo"],
+    resting: "Gonza",
+  },
+  {
+    round: 2,
+    team1: ["Gonza", "Paulo"],
+    team2: ["Ivo", "Diogo"],
+    resting: "Pedro",
+  },
+  {
+    round: 3,
+    team1: ["Gonza", "Pedro"],
+    team2: ["Ivo", "Diogo"],
+    resting: "Paulo",
+  },
+  {
+    round: 4,
+    team1: ["Gonza", "Pedro"],
+    team2: ["Paulo", "Diogo"],
+    resting: "Ivo",
+  },
+  {
+    round: 5,
+    team1: ["Gonza", "Pedro"],
+    team2: ["Paulo", "Ivo"],
+    resting: "Diogo",
+  },
+  {
+    round: 6,
+    team1: ["Pedro", "Ivo"],
+    team2: ["Paulo", "Diogo"],
+    resting: "Gonza",
+  },
+  {
+    round: 7,
+    team1: ["Gonza", "Ivo"],
+    team2: ["Paulo", "Diogo"],
+    resting: "Pedro",
+  },
+  {
+    round: 8,
+    team1: ["Gonza", "Ivo"],
+    team2: ["Pedro", "Diogo"],
+    resting: "Paulo",
+  },
+  {
+    round: 9,
+    team1: ["Gonza", "Paulo"],
+    team2: ["Pedro", "Diogo"],
+    resting: "Ivo",
+  },
+  {
+    round: 10,
+    team1: ["Gonza", "Paulo"],
+    team2: ["Pedro", "Ivo"],
+    resting: "Diogo",
+  },
+  {
+    round: 11,
+    team1: ["Pedro", "Diogo"],
+    team2: ["Paulo", "Ivo"],
+    resting: "Gonza",
+  },
+  {
+    round: 12,
+    team1: ["Gonza", "Diogo"],
+    team2: ["Paulo", "Ivo"],
+    resting: "Pedro",
+  },
+  {
+    round: 13,
+    team1: ["Gonza", "Diogo"],
+    team2: ["Pedro", "Ivo"],
+    resting: "Paulo",
+  },
+  {
+    round: 14,
+    team1: ["Gonza", "Diogo"],
+    team2: ["Pedro", "Paulo"],
+    resting: "Ivo",
+  },
+  {
+    round: 15,
+    team1: ["Gonza", "Ivo"],
+    team2: ["Pedro", "Paulo"],
+    resting: "Diogo",
+  },
+];
+
+const PLAYERS: PlayerName[] = ["Gonza", "Pedro", "Paulo", "Ivo", "Diogo"];
+
+// Types for window.storage
+declare global {
+  interface Window {
+    storage: {
+      get: (key: string) => Promise<{ value: string } | null>;
+      set: (key: string, val: string) => Promise<void>;
+    };
+  }
+}
+
+export default function PadelTournament() {
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [cycles, setCycles] = useState<number>(1);
+  const [activeTab, setActiveTab] = useState<"matches" | "leaderboard">(
+    "matches"
+  );
+  const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    loadMatches();
+  }, []);
+
+  const getInitialMatches = (
+    cycle: number,
+    startGlobalRound: number = 1
+  ): Match[] =>
+    TOURNAMENT_STRUCTURE.map((match, idx) => ({
+      ...match,
+      id: `cycle-${cycle}-round-${match.round}`,
+      cycle: cycle,
+      globalRound: startGlobalRound + idx,
+      score1_set1: null,
+      score1_set2: null,
+      score2_set1: null,
+      score2_set2: null,
+      completed: false,
+    }));
+
+  const loadMatches = async () => {
+    try {
+      const result = await window.storage.get("padel-matches-v2");
+      if (result) {
+        const data = JSON.parse(result.value) as {
+          matches: Match[];
+          cycles: number;
+        };
+        setMatches(data.matches);
+        setCycles(data.cycles);
+      } else {
+        setMatches(getInitialMatches(1));
+        setCycles(1);
+      }
+    } catch {
+      setMatches(getInitialMatches(1));
+      setCycles(1);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveMatches = async (
+    updatedMatches: Match[],
+    updatedCycles?: number
+  ) => {
+    try {
+      const data = {
+        matches: updatedMatches,
+        cycles: updatedCycles ?? cycles,
+        lastUpdated: new Date().toISOString(),
+      };
+      await window.storage.set("padel-matches-v2", JSON.stringify(data));
+      setMatches(updatedMatches);
+      if (updatedCycles) setCycles(updatedCycles);
+    } catch (error) {
+      console.error("Error saving matches:", error);
+      alert("Failed to save match data");
+    }
+  };
+
+  const updateScore = (
+    matchId: string,
+    field: keyof Pick<
+      Match,
+      "score1_set1" | "score1_set2" | "score2_set1" | "score2_set2"
+    >,
+    value: string
+  ) => {
+    const updated = matches.map((match) => {
+      if (match.id === matchId) {
+        const numValue = value === "" ? null : parseInt(value);
+        const updatedMatch = { ...match, [field]: numValue };
+
+        // Mark as completed if all scores are set
+        if (
+          updatedMatch.score1_set1 !== null &&
+          updatedMatch.score1_set2 !== null &&
+          updatedMatch.score2_set1 !== null &&
+          updatedMatch.score2_set2 !== null
+        ) {
+          updatedMatch.completed = true;
+        } else {
+          updatedMatch.completed = false;
+        }
+
+        return updatedMatch;
+      }
+      return match;
+    });
+
+    saveMatches(updated);
+  };
+
+  const addNewCycle = () => {
+    const newCycle = cycles + 1;
+    const newMatches = getInitialMatches(newCycle, matches.length + 1);
+    const updatedMatches = [...matches, ...newMatches];
+    saveMatches(updatedMatches, newCycle);
+  };
+
+  const getMatchWinner = (match: Match): "team1" | "team2" | null => {
+    if (!match.completed) return null;
+    const team1Sets =
+      (match.score1_set1! > match.score2_set1! ? 1 : 0) +
+      (match.score1_set2! > match.score2_set2! ? 1 : 0);
+    const team2Sets =
+      (match.score2_set1! > match.score1_set1! ? 1 : 0) +
+      (match.score2_set2! > match.score1_set2! ? 1 : 0);
+    if (team1Sets > team2Sets) return "team1";
+    return "team2";
+  };
+
+  const calculateStats = (): Stats => {
+    const stats: Stats = {};
+    PLAYERS.forEach((player) => {
+      stats[player] = {
+        played: 0,
+        won: 0,
+        lost: 0,
+        setsWon: 0,
+        setsLost: 0,
+        gamesWon: 0,
+        gamesLost: 0,
+      };
+    });
+
+    matches.forEach((match) => {
+      if (!match.completed) return;
+      const winner = getMatchWinner(match);
+      const team1Won = winner === "team1";
+      const team1GamesWon = (match.score1_set1 ?? 0) + (match.score1_set2 ?? 0);
+      const team1GamesLost =
+        (match.score2_set1 ?? 0) + (match.score2_set2 ?? 0);
+      const team2GamesWon = (match.score2_set1 ?? 0) + (match.score2_set2 ?? 0);
+      const team2GamesLost =
+        (match.score1_set1 ?? 0) + (match.score1_set2 ?? 0);
+
+      const team1SetsWon =
+        (match.score1_set1! > match.score2_set1! ? 1 : 0) +
+        (match.score1_set2! > match.score2_set2! ? 1 : 0);
+      const team1SetsLost =
+        (match.score2_set1! > match.score1_set1! ? 1 : 0) +
+        (match.score2_set2! > match.score1_set2! ? 1 : 0);
+      const team2SetsWon = team1SetsLost;
+      const team2SetsLost = team1SetsWon;
+
+      match.team1.forEach((player) => {
+        stats[player].played++;
+        stats[player].gamesWon += team1GamesWon;
+        stats[player].gamesLost += team1GamesLost;
+        stats[player].setsWon += team1SetsWon;
+        stats[player].setsLost += team1SetsLost;
+        if (team1Won) stats[player].won++;
+        else stats[player].lost++;
+      });
+
+      match.team2.forEach((player) => {
+        stats[player].played++;
+        stats[player].gamesWon += team2GamesWon;
+        stats[player].gamesLost += team2GamesLost;
+        stats[player].setsWon += team2SetsWon;
+        stats[player].setsLost += team2SetsLost;
+        if (!team1Won) stats[player].won++;
+        else stats[player].lost++;
+      });
+    });
+    return stats;
+  };
+
+  const resetTournament = async () => {
+    if (
+      window.confirm(
+        "Are you sure you want to reset all matches? This cannot be undone."
+      )
+    ) {
+      const initialMatches = getInitialMatches(1);
+      saveMatches(initialMatches, 1);
+    }
+  };
+
+  const stats = calculateStats();
+  const leaderboard: LeaderEntry[] = Object.entries(stats)
+    .map(([name, data]) => ({
+      name: name as PlayerName,
+      ...data,
+      winRate:
+        data.played > 0 ? ((data.won / data.played) * 100).toFixed(1) : 0,
+      gameDiff: data.gamesWon - data.gamesLost,
+    }))
+    .sort(
+      (a, b) =>
+        b.won - a.won || b.setsWon - a.setsWon || b.gameDiff - a.gameDiff
+    );
+
+  // Group matches by cycle
+  const matchesByCycle: { [cycle: number]: Match[] } = {};
+  matches.forEach((match) => {
+    if (!matchesByCycle[match.cycle]) {
+      matchesByCycle[match.cycle] = [];
+    }
+    matchesByCycle[match.cycle].push(match);
+  });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center">
+        <div className="text-xl text-gray-600">Loading tournament...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <Trophy className="w-8 h-8 text-yellow-500" />
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800">
+                  Padel Tournament
+                </h1>
+                <p className="text-gray-600">
+                  5 Players - {matches.length} Total Rounds ({cycles} Cycle
+                  {cycles > 1 ? "s" : ""})
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={addNewCycle}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
+              >
+                <Plus className="w-5 h-5" />
+                Add 15 Rounds
+              </button>
+              <button
+                onClick={resetTournament}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+              >
+                Reset All
+              </button>
+            </div>
+          </div>
+
+          {/* Storage Info */}
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>💾 Storage:</strong> All scores are saved automatically to
+              persistent storage. Your data is saved in the browser and will
+              persist across sessions. For Supabase integration, replace{" "}
+              <code className="px-1 py-0.5 bg-blue-100 rounded">
+                window.storage
+              </code>{" "}
+              calls with Supabase queries.
+            </p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setActiveTab("matches")}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition ${
+              activeTab === "matches"
+                ? "bg-white text-blue-600 shadow-lg"
+                : "bg-white/50 text-gray-600 hover:bg-white"
+            }`}
+          >
+            <Calendar className="w-5 h-5" />
+            Matches
+          </button>
+          <button
+            onClick={() => setActiveTab("leaderboard")}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition ${
+              activeTab === "leaderboard"
+                ? "bg-white text-blue-600 shadow-lg"
+                : "bg-white/50 text-gray-600 hover:bg-white"
+            }`}
+          >
+            <TrendingUp className="w-5 h-5" />
+            Leaderboard
+          </button>
+        </div>
+
+        {/* Content */}
+        {activeTab === "matches" && (
+          <div className="space-y-8">
+            {Object.keys(matchesByCycle)
+              .sort((a, b) => Number(b) - Number(a))
+              .map((cycleNum) => (
+                <div key={cycleNum} className="space-y-4">
+                  <div className="flex items-center gap-3 mb-4">
+                    <RotateCw className="w-6 h-6 text-blue-600" />
+                    <h2 className="text-2xl font-bold text-gray-800">
+                      Cycle {cycleNum}
+                    </h2>
+                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                      {
+                        matchesByCycle[Number(cycleNum)].filter(
+                          (m) => m.completed
+                        ).length
+                      }{" "}
+                      / {matchesByCycle[Number(cycleNum)].length} completed
+                    </span>
+                  </div>
+                  {matchesByCycle[Number(cycleNum)].map((match, index) => {
+                    const winner = getMatchWinner(match);
+                    return (
+                      <div
+                        key={match.id}
+                        className={`bg-white rounded-lg shadow-md p-6 transition ${
+                          match.completed
+                            ? "border-l-4 border-green-500"
+                            : "border-l-4 border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+                              {match.round}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              Resting:{" "}
+                              <span className="font-medium text-gray-700">
+                                {match.resting}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              #{match.globalRound}
+                            </div>
+                          </div>
+                          {match.completed && (
+                            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                              Completed
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-4">
+                          {/* Team 1 */}
+                          <div
+                            className={`p-4 rounded-lg ${
+                              winner === "team1"
+                                ? "bg-green-50 border-2 border-green-500"
+                                : "bg-gray-50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-1">
+                                <Users className="w-5 h-5 text-blue-500" />
+                                <span className="font-semibold text-gray-800 text-lg">
+                                  {match.team1.join(" & ")}
+                                </span>
+                                {winner === "team1" && (
+                                  <Trophy className="w-5 h-5 text-green-600" />
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={99}
+                                    value={
+                                      match.score1_set1 === null
+                                        ? ""
+                                        : match.score1_set1
+                                    }
+                                    onChange={(
+                                      e: ChangeEvent<HTMLInputElement>
+                                    ) =>
+                                      updateScore(
+                                        match.id,
+                                        "score1_set1",
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="0"
+                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
+                                  />
+                                  <span className="text-gray-400 font-bold">
+                                    -
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={99}
+                                    value={
+                                      match.score1_set2 === null
+                                        ? ""
+                                        : match.score1_set2
+                                    }
+                                    onChange={(
+                                      e: ChangeEvent<HTMLInputElement>
+                                    ) =>
+                                      updateScore(
+                                        match.id,
+                                        "score1_set2",
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="0"
+                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          {/* VS Divider */}
+                          <div className="text-center">
+                            <span className="text-xl font-bold text-gray-400">
+                              VS
+                            </span>
+                          </div>
+                          {/* Team 2 */}
+                          <div
+                            className={`p-4 rounded-lg ${
+                              winner === "team2"
+                                ? "bg-green-50 border-2 border-green-500"
+                                : "bg-gray-50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-1">
+                                <Users className="w-5 h-5 text-red-500" />
+                                <span className="font-semibold text-gray-800 text-lg">
+                                  {match.team2.join(" & ")}
+                                </span>
+                                {winner === "team2" && (
+                                  <Trophy className="w-5 h-5 text-green-600" />
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={99}
+                                    value={
+                                      match.score2_set1 === null
+                                        ? ""
+                                        : match.score2_set1
+                                    }
+                                    onChange={(
+                                      e: ChangeEvent<HTMLInputElement>
+                                    ) =>
+                                      updateScore(
+                                        match.id,
+                                        "score2_set1",
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="0"
+                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
+                                  />
+                                  <span className="text-gray-400 font-bold">
+                                    -
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={99}
+                                    value={
+                                      match.score2_set2 === null
+                                        ? ""
+                                        : match.score2_set2
+                                    }
+                                    onChange={(
+                                      e: ChangeEvent<HTMLInputElement>
+                                    ) =>
+                                      updateScore(
+                                        match.id,
+                                        "score2_set2",
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="0"
+                                    className="w-16 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-center text-xl font-bold"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+          </div>
+        )}
+        {activeTab === "leaderboard" && (
+          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
+                  <tr>
+                    <th className="px-6 py-4 text-left font-semibold">Rank</th>
+                    <th className="px-6 py-4 text-left font-semibold">
+                      Player
+                    </th>
+                    <th className="px-6 py-4 text-center font-semibold">
+                      Played
+                    </th>
+                    <th className="px-6 py-4 text-center font-semibold">Won</th>
+                    <th className="px-6 py-4 text-center font-semibold">
+                      Lost
+                    </th>
+                    <th className="px-6 py-4 text-center font-semibold">
+                      Win %
+                    </th>
+                    <th className="px-6 py-4 text-center font-semibold">
+                      Sets W-L
+                    </th>
+                    <th className="px-6 py-4 text-center font-semibold">
+                      Games W-L
+                    </th>
+                    <th className="px-6 py-4 text-center font-semibold">
+                      Game Diff
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaderboard.map((player, index) => (
+                    <tr
+                      key={player.name}
+                      className={`border-b border-gray-200 hover:bg-blue-50 transition ${
+                        index === 0 ? "bg-yellow-50" : ""
+                      }`}
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {index === 0 && (
+                            <Trophy className="w-5 h-5 text-yellow-500" />
+                          )}
+                          <span className="font-bold text-gray-700">
+                            {index + 1}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-gray-800">
+                        {player.name}
+                      </td>
+                      <td className="px-6 py-4 text-center">{player.played}</td>
+                      <td className="px-6 py-4 text-center text-green-600 font-semibold">
+                        {player.won}
+                      </td>
+                      <td className="px-6 py-4 text-center text-red-600 font-semibold">
+                        {player.lost}
+                      </td>
+                      <td className="px-6 py-4 text-center font-medium">
+                        {player.winRate}%
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {player.setsWon}-{player.setsLost}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {player.gamesWon}-{player.gamesLost}
+                      </td>
+                      <td
+                        className={`px-6 py-4 text-center font-semibold ${
+                          player.gameDiff > 0
+                            ? "text-green-600"
+                            : player.gameDiff < 0
+                            ? "text-red-600"
+                            : "text-gray-600"
+                        }`}
+                      >
+                        {player.gameDiff > 0 ? "+" : ""}
+                        {player.gameDiff}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
