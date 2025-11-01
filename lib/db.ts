@@ -10,10 +10,8 @@ export interface Match {
   team2_player1: string;
   team2_player2: string;
   resting_player: string;
-  score1_set1: number | null;
-  score1_set2: number | null;
-  score2_set1: number | null;
-  score2_set2: number | null;
+  score1: number | null;
+  score2: number | null;
   completed: boolean;
   created_at?: Date;
   updated_at?: Date;
@@ -47,10 +45,8 @@ export async function updateMatch(match: Match): Promise<Match> {
   const { rows } = await sql<Match>`
     UPDATE matches 
     SET 
-      score1_set1 = ${match.score1_set1},
-      score1_set2 = ${match.score1_set2},
-      score2_set1 = ${match.score2_set1},
-      score2_set2 = ${match.score2_set2},
+      score1 = ${match.score1},
+      score2 = ${match.score2},
       completed = ${match.completed},
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ${match.id}
@@ -68,16 +64,14 @@ export async function insertMatches(matches: Match[]): Promise<void> {
         team1_player1, team1_player2,
         team2_player1, team2_player2,
         resting_player,
-        score1_set1, score1_set2,
-        score2_set1, score2_set2,
+        score1, score2,
         completed
       ) VALUES (
         ${match.id}, ${match.cycle}, ${match.round}, ${match.global_round},
         ${match.team1_player1}, ${match.team1_player2},
         ${match.team2_player1}, ${match.team2_player2},
         ${match.resting_player},
-        ${match.score1_set1}, ${match.score1_set2},
-        ${match.score2_set1}, ${match.score2_set2},
+        ${match.score1}, ${match.score2},
         ${match.completed}
       )
     `;
